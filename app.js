@@ -6,11 +6,19 @@
 // Uses your data.json headers exactly:
 //  ITEM, RAW VALUE, PRICE, PROFIT, Margin, TAG, DIY, NOTES, Recipies
 //
-// Feature: clicking a recipe name auto-filters search to that item + highlights it.
+// Adds recipes.json support (crafting materials):
+//  Name, #1..#6, Material 1..Material 6
+//
+// Features:
+// - Search prioritizes ITEM name matches first (so "carp" bubbles up)
+// - Clicking a "recipe" name filters to that item + highlights it
+// - Shows structured Materials from recipes.json when available
+// - Clicking a material searches that material (and shows craftables that use it)
 // =========================
 
 let ALL = [];
 let VIEW = [];
+let RECIPES = [];
 let pendingHighlight = null;
 
 const els = {
@@ -47,7 +55,6 @@ function toNumber(v) {
   const s = String(v).trim();
   if (!s || s === "-") return NaN;
 
-  // remove commas + % + parentheses (for negatives like (130))
   const cleaned = s
     .replaceAll(",", "")
     .replaceAll("%", "")
@@ -70,24 +77,83 @@ const splitCSV = (s) =>
         .filter(Boolean)
     : [];
 
+// ---- recipes.json helpers ----
+function recipeKey(name) {
+  return norm(name).toLowerCase();
+}
+
+function getRecipeForItem(itemName) {
+  const key = recipeKey(itemName);
+  return RECIPES.find((r) => recipeKey(r["Name"]) === key) || null;
+}
+
+function recipeMaterials(recipeRow) {
+  if (!recipeRow) return [];
+  const out = [];
+  for (let i = 1; i <= 6; i++) {
+    const qty = recipeRow[`#${i}`];
+    const mat = norm(recipeRow[`Material ${i}`]);
+
+    const q = typeof qty === "number" ? qty : toNumber(qty);
+    if (mat && Number.isFinite(q) && q > 0) {
+      out.push({ qty: q, mat });
+    }
+  }
+  return out;
+}
+
+// Checks whether an item uses a material (for search)
+function itemUsesMaterial(itemName, materialQuery) {
+  const r = getRecipeForItem(itemName);
+  if (!r) return false;
+  const mats = recipeMaterials(r);
+  const q = materialQuery.toLowerCase();
+  return mats.some((m) => m.mat.toLowerCase().includes(q));
+}
+
 // ---- data ----
 async function loadData() {
   setStatus("Loading...");
-  const res = await fetch("./data.json", { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to load data.json (${res.status})`);
 
-  const data = await res.json();
-  if (!Array.isArray(data)) throw new Error("data.json must be an array of objects");
+  try {
+    const [itemsRes, recipesRes] = await Promise.all([
+      fetch("./data.json", { cache: "no-store" }),
+      fetch("./recipes.json", { cache: "no-store" }), // ok if present
+    ]);
 
-  ALL = data.map((row) => normalizeRow(row));
-  buildTagOptions();
-  applyFilters();
-  setStatus("");
+    if (!itemsRes.ok) throw new Error(`Failed to load data.json (${itemsRes.status})`);
+
+    const itemsJson = await itemsRes.json();
+    if (!Array.isArray(itemsJson)) throw new Error("data.json must be an array of objects");
+
+    ALL = itemsJson.map((row) => normalizeRow(row));
+
+    // recipes.json is optional — if missing, we just skip materials feature
+    if (recipesRes && recipesRes.ok) {
+      const recipesJson = await recipesRes.json();
+      if (Array.isArray(recipesJson)) {
+        RECIPES = recipesJson;
+      } else {
+        RECIPES = [];
+        console.warn("recipes.json exists but is not an array; ignoring.");
+      }
+    } else {
+      RECIPES = [];
+    }
+
+    buildTagOptions();
+    applyFilters();
+    setStatus("");
+  } catch (err) {
+    console.error(err);
+    setStatus(String(err.message || err), true);
+    if (els.list) els.list.innerHTML = `<div class="empty">Failed to load data.</div>`;
+  }
 }
 
 function normalizeRow(row) {
   return {
-    // Keep exact headers (case + spaces)
+    // Keep exact headers (case + spaces) from your sheet/json
     ITEM: norm(row["ITEM"]),
     RAW_VALUE: row["RAW VALUE"],
     PRICE: row["PRICE"],
@@ -106,7 +172,7 @@ function buildTagOptions() {
     a.localeCompare(b)
   );
 
-  const current = els.tag.value;
+  const current = els.tag?.value || "";
 
   els.tag.innerHTML =
     `<option value="">All tags</option>` +
@@ -117,61 +183,76 @@ function buildTagOptions() {
 
 // ---- filter/sort/render ----
 function applyFilters() {
-  const qRaw = norm(els.search.value);
-  const q = qRaw.toLowerCase();
+  const q = norm(els.search.value);
   const tag = norm(els.tag.value);
   const diyOnly = !!(els.diyOnly && els.diyOnly.checked);
 
-  VIEW = ALL.filter((x) => {
-    if (tag && x.TAG !== tag) return false;
-    if (diyOnly && x.DIY.toLowerCase() !== "yes") return false;
+  const qLower = q.toLowerCase();
 
-    if (!q) return true;
+  // Build results with a relevance score so ITEM matches float to top
+  // Score rules (bigger = higher):
+  // - Exact ITEM match: 1000
+  // - ITEM startsWith: 800
+  // - ITEM includes: 600
+  // - Material match (crafting): 450
+  // - NOTES includes: 300
+  // - Recipies text includes: 250
+  // - TAG includes: 200
+  const scored = [];
 
-    // keep matching across item + notes + recipes + tag
-    return (
-      includesCI(x.ITEM, q) ||
-      includesCI(x.NOTES, q) ||
-      includesCI(x.RECIPES, q) ||
-      includesCI(x.TAG, q)
-    );
-  });
+  for (const x of ALL) {
+    if (tag && x.TAG !== tag) continue;
+    if (diyOnly && x.DIY.toLowerCase() !== "yes") continue;
 
-  // If searching, rank results so ITEM name hits come first
+    if (!q) {
+      scored.push({ x, score: 0 });
+      continue;
+    }
+
+    let score = 0;
+    const itemLower = x.ITEM.toLowerCase();
+
+    if (itemLower === qLower) score = Math.max(score, 1000);
+    else if (itemLower.startsWith(qLower)) score = Math.max(score, 800);
+    else if (itemLower.includes(qLower)) score = Math.max(score, 600);
+
+    // Structured materials search
+    if (RECIPES.length && itemUsesMaterial(x.ITEM, qLower)) {
+      score = Math.max(score, 450);
+    }
+
+    if (includesCI(x.NOTES, q)) score = Math.max(score, 300);
+    if (includesCI(x.RECIPES, q)) score = Math.max(score, 250);
+    if (includesCI(x.TAG, q)) score = Math.max(score, 200);
+
+    if (score > 0) scored.push({ x, score });
+  }
+
+  VIEW = scored.map((s) => s.x);
+
+  // If searching, sort by relevance first, then by selected sort mode
   if (q) {
-    const score = (x) => {
-      const item = norm(x.ITEM).toLowerCase();
-      const notes = norm(x.NOTES).toLowerCase();
-      const rec = norm(x.RECIPES).toLowerCase();
+    const mode = els.sort.value || "name_asc";
+    const secondarySorted = sortView([...VIEW], mode);
 
-      if (item === q) return 1000;         // exact item match
-      if (item.startsWith(q)) return 800;  // item prefix
-      if (item.includes(` ${q}`) || item.includes(`-${q}`)) return 700; // boundary-ish
-      if (item.includes(q)) return 600;    // item contains
+    // We need relevance ordering primarily; keep stable secondary where possible
+    // We'll sort scored by score desc, and for ties use index in secondarySorted
+    const secondaryIndex = new Map(secondarySorted.map((it, idx) => [it, idx]));
 
-      if (notes.includes(q)) return 200;   // notes match
-      if (rec.includes(q)) return 100;     // recipes match
-
-      return 0;
-    };
-
-    VIEW.sort((a, b) => {
-      const sb = score(b);
-      const sa = score(a);
-      if (sb !== sa) return sb - sa;
-      // stable tie-breaker
-      return norm(a.ITEM).localeCompare(norm(b.ITEM));
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (secondaryIndex.get(a.x) ?? 0) - (secondaryIndex.get(b.x) ?? 0);
     });
+
+    VIEW = scored.map((s) => s.x);
   } else {
-    // No search text -> use normal sort dropdown
-    VIEW = sortView(VIEW);
+    VIEW = sortView(VIEW, els.sort.value || "name_asc");
   }
 
   render();
 }
 
-function sortView(arr) {
-  const mode = els.sort.value || "name_asc";
+function sortView(arr, mode) {
   const out = [...arr];
 
   const cmpText = (a, b) => a.localeCompare(b);
@@ -179,7 +260,6 @@ function sortView(arr) {
     const av = toNumber(a);
     const bv = toNumber(b);
 
-    // push NaN to bottom
     const aBad = !Number.isFinite(av);
     const bBad = !Number.isFinite(bv);
     if (aBad && bBad) return 0;
@@ -256,10 +336,11 @@ function renderCard(x) {
   const raw = x.RAW_VALUE ?? "-";
 
   const notes = norm(x.NOTES);
-  const recipes = norm(x.RECIPES);
+  const recipesText = norm(x.RECIPES);
 
-  const recipeLinks = recipes
-    ? splitCSV(recipes)
+  // Old "Recipies" column: clickable links (auto search item)
+  const recipeLinks = recipesText
+    ? splitCSV(recipesText)
         .map((r) => {
           const safe = escapeHtml(r);
           return `<a href="#" class="recipe-link" data-item="${safe}">${safe}</a>`;
@@ -267,11 +348,30 @@ function renderCard(x) {
         .join(", ")
     : "";
 
+  // Structured recipe from recipes.json (materials list)
+  const structuredRecipe = getRecipeForItem(item);
+  const mats = recipeMaterials(structuredRecipe);
+
+  const materialsBlock = mats.length
+    ? `<div class="materials">
+        <strong>Materials:</strong>
+        ${mats
+          .map(
+            (m) =>
+              `<a href="#" class="material-link" data-material="${escapeHtml(m.mat)}">${m.qty} × ${escapeHtml(
+                m.mat
+              )}</a>`
+          )
+          .join(", ")}
+      </div>`
+    : "";
+
   const notesBlock =
-    notes || recipes
+    notes || recipesText || mats.length
       ? `<div class="notes">
           ${notes ? `<div><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : ""}
-          ${recipes ? `<div><strong>Recipes:</strong> ${recipeLinks}</div>` : ""}
+          ${recipesText ? `<div><strong>Recipes:</strong> ${recipeLinks}</div>` : ""}
+          ${materialsBlock}
         </div>`
       : "";
 
@@ -300,7 +400,7 @@ function wireEvents() {
   els.sort.addEventListener("change", applyFilters);
   els.diyOnly.addEventListener("change", applyFilters);
 
-  // Click recipe -> set search to that recipe name and highlight it
+  // Click recipe (from Recipies column) -> set search to that item + highlight it
   document.addEventListener("click", (e) => {
     const link = e.target.closest(".recipe-link");
     if (!link) return;
@@ -310,13 +410,25 @@ function wireEvents() {
     const targetItem = norm(link.dataset.item);
     if (!targetItem) return;
 
-    // Set search to exact item name
     els.search.value = targetItem;
-
-    // Clear tag filter so you don't "filter away" the target by accident
     els.tag.value = "";
-
     pendingHighlight = targetItem;
+    applyFilters();
+  });
+
+  // Click material -> search by that material
+  document.addEventListener("click", (e) => {
+    const link = e.target.closest(".material-link");
+    if (!link) return;
+
+    e.preventDefault();
+
+    const mat = norm(link.dataset.material);
+    if (!mat) return;
+
+    els.search.value = mat;
+    // Don't clear tag; user might want "Furniture" etc + material search.
+    pendingHighlight = null;
     applyFilters();
   });
 }
@@ -324,9 +436,5 @@ function wireEvents() {
 // ---- init ----
 (function init() {
   wireEvents();
-  loadData().catch((err) => {
-    console.error(err);
-    setStatus(String(err.message || err), true);
-    if (els.list) els.list.innerHTML = `<div class="empty">Failed to load data.json</div>`;
-  });
+  loadData();
 })();
