@@ -1,4 +1,4 @@
-:root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+:root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; } 
 body { margin: 0; background:#0f0f10; color:#f3f3f3; }
 .top { padding: 14px 16px; border-bottom: 1px solid #232326; background:#111112; position: sticky; top:0; }
 .wrap { padding: 12px 12px 24px; max-width: 900px; margin: 0 auto; }
