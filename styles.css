@@ -1,27 +1,163 @@
-:root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; } 
-body { margin: 0; background:#0f0f10; color:#f3f3f3; }
-.top { padding: 14px 16px; border-bottom: 1px solid #232326; background:#111112; position: sticky; top:0; }
-.wrap { padding: 12px 12px 24px; max-width: 900px; margin: 0 auto; }
-h1 { margin: 0; font-size: 18px; }
-.sub { margin: 4px 0 0; color:#b9b9c0; font-size: 12px; }
-
-.controls { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; margin: 12px 0; }
-.controls input, .controls select {
-  width: 100%; padding: 10px 12px; border-radius: 10px;
-  border: 1px solid #2a2a2f; background:#141416; color:#f3f3f3;
+:root{
+  --bg:#0b0c0f;
+  --panel:#12141a;
+  --panel2:#0f1116;
+  --text:#e8eaf0;
+  --muted:#a3a7b5;
+  --stroke:rgba(255,255,255,.08);
+  --stroke2:rgba(255,255,255,.12);
+  --shadow: 0 10px 40px rgba(0,0,0,.55);
+  --radius: 18px;
 }
-.check { grid-column: 1 / -1; display:flex; gap:10px; align-items:center; color:#d7d7dd; }
-.check input { transform: scale(1.2); }
 
-.stats { color:#b9b9c0; font-size: 12px; margin-bottom: 10px; }
-
-.list { display: grid; gap: 10px; }
-.card {
-  border: 1px solid #2a2a2f; background:#141416;
-  border-radius: 14px; padding: 12px;
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(1200px 600px at 50% -100px, rgba(255,255,255,.08), transparent 60%),
+    linear-gradient(180deg, #07080a 0%, var(--bg) 60%, #07080a 100%);
 }
-.card h3 { margin: 0 0 6px; font-size: 16px; }
-.meta { display:flex; flex-wrap: wrap; gap: 8px; color:#b9b9c0; font-size: 12px; }
-.pill { border:1px solid #2a2a2f; border-radius: 999px; padding: 2px 8px; }
-.note { margin-top: 8px; color:#d7d7dd; font-size: 13px; }
-.recipe { margin-top: 8px; color:#d7d7dd; font-size: 13px; }
+
+.topbar{
+  padding: 20px 18px 10px;
+}
+
+.title{
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+h1{
+  margin:0;
+  font-size: 26px;
+  letter-spacing:.2px;
+}
+
+.sub{
+  margin:6px 0 0;
+  color:var(--muted);
+  font-size: 13px;
+}
+
+.wrap{
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 12px 18px 40px;
+}
+
+.card{
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.controls .row{
+  display:flex;
+  gap: 12px;
+  align-items:center;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 760px){
+  .controls .row{flex-direction:column; align-items:stretch;}
+}
+
+.input, .select{
+  width: 100%;
+  background: var(--panel2);
+  border: 1px solid var(--stroke2);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: 14px;
+  outline: none;
+}
+
+.select{ cursor:pointer; }
+
+.toggle{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding: 10px 12px;
+  border: 1px solid var(--stroke2);
+  background: var(--panel2);
+  border-radius: 14px;
+  user-select:none;
+  white-space:nowrap;
+}
+
+.toggle input{ transform: scale(1.1); }
+
+.meta{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status{
+  color: #ffd38a;
+}
+
+.list{
+  margin-top: 16px;
+  display:flex;
+  flex-direction:column;
+  gap: 12px;
+}
+
+.item{
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.item h3{
+  margin:0 0 10px;
+  font-size: 18px;
+  letter-spacing:.2px;
+}
+
+.pills{
+  display:flex;
+  flex-wrap:wrap;
+  gap: 8px;
+}
+
+.pill{
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--stroke2);
+  background: rgba(0,0,0,.25);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.notes{
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.badge{
+  color: #b9f6ca;
+  border-color: rgba(185,246,202,.25);
+}
+.badge.no{
+  color: #ffb4ab;
+  border-color: rgba(255,180,171,.25);
+}
+
+.error{
+  color: #ffb4ab;
+  border-color: rgba(255,180,171,.25);
+  background: rgba(255,0,0,.06);
+}
