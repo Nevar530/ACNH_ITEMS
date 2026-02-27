@@ -117,7 +117,8 @@ function buildTagOptions() {
 
 // ---- filter/sort/render ----
 function applyFilters() {
-  const q = norm(els.search.value);
+  const qRaw = norm(els.search.value);
+  const q = qRaw.toLowerCase();
   const tag = norm(els.tag.value);
   const diyOnly = !!(els.diyOnly && els.diyOnly.checked);
 
@@ -127,7 +128,7 @@ function applyFilters() {
 
     if (!q) return true;
 
-    // Search across item + notes + recipes + tag
+    // keep matching across item + notes + recipes + tag
     return (
       includesCI(x.ITEM, q) ||
       includesCI(x.NOTES, q) ||
@@ -136,7 +137,36 @@ function applyFilters() {
     );
   });
 
-  VIEW = sortView(VIEW);
+  // If searching, rank results so ITEM name hits come first
+  if (q) {
+    const score = (x) => {
+      const item = norm(x.ITEM).toLowerCase();
+      const notes = norm(x.NOTES).toLowerCase();
+      const rec = norm(x.RECIPES).toLowerCase();
+
+      if (item === q) return 1000;         // exact item match
+      if (item.startsWith(q)) return 800;  // item prefix
+      if (item.includes(` ${q}`) || item.includes(`-${q}`)) return 700; // boundary-ish
+      if (item.includes(q)) return 600;    // item contains
+
+      if (notes.includes(q)) return 200;   // notes match
+      if (rec.includes(q)) return 100;     // recipes match
+
+      return 0;
+    };
+
+    VIEW.sort((a, b) => {
+      const sb = score(b);
+      const sa = score(a);
+      if (sb !== sa) return sb - sa;
+      // stable tie-breaker
+      return norm(a.ITEM).localeCompare(norm(b.ITEM));
+    });
+  } else {
+    // No search text -> use normal sort dropdown
+    VIEW = sortView(VIEW);
+  }
+
   render();
 }
 
