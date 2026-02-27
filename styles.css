@@ -161,3 +161,21 @@ h1{
   border-color: rgba(255,180,171,.25);
   background: rgba(255,0,0,.06);
 }
+
+/* clickable recipe links */
+.recipe-link {
+  color: #7dd3fc;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(125,211,252,.5);
+  cursor: pointer;
+}
+
+.recipe-link:hover {
+  color: #a5f3fc;
+}
+
+/* highlight animation when jumping to filtered item */
+.flash {
+  outline: 2px solid #5de4c7;
+  transition: outline 0.3s ease;
+}
