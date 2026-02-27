@@ -1,4 +1,4 @@
-let DATA = [];
+let DATA = []; 
 
 const elQ = document.getElementById("q");
 const elTag = document.getElementById("tag");
