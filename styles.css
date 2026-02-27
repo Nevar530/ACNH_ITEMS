@@ -162,3 +162,20 @@ body {
   padding: 30px;
   opacity: 0.6;
 }
+
+.material-link {
+  color: #86efac; /* light green */
+  text-decoration: none;
+  font-weight: 600;
+  background: rgba(134, 239, 172, 0.12);
+  padding: 4px 8px;
+  border-radius: 8px;
+  display: inline-block;
+  border: 1px solid rgba(134, 239, 172, 0.25);
+  transition: 0.15s ease;
+}
+
+.material-link:hover {
+  background: rgba(134, 239, 172, 0.22);
+  border-color: rgba(134, 239, 172, 0.5);
+}
