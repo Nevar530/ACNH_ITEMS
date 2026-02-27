@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ACNH Item DB</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#111111" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="title">
+      <h1>ACNH Item DB</h1>
+      <p class="sub">Search + filter. Works offline.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="controls">
+      <input id="q" placeholder="Search item, notes, recipes…" autocomplete="off" />
+      <select id="tag">
+        <option value="">All tags</option>
+      </select>
+      <label class="check">
+        <input type="checkbox" id="diy" />
+        DIY only
+      </label>
+      <select id="sort">
+        <option value="item_asc">Name (A→Z)</option>
+        <option value="price_desc">Price (high→low)</option>
+        <option value="price_asc">Price (low→high)</option>
+        <option value="profit_desc">Profit (high→low)</option>
+      </select>
+    </section>
+
+    <section id="stats" class="stats"></section>
+    <section id="list" class="list"></section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
