@@ -175,12 +175,20 @@ function render() {
 
     const diyClass = norm(diy) === "yes" ? "badge" : "badge no";
 
-    const notesBlock = (notes || recipes)
-      ? `<div class="notes">
-          ${notes ? `<div><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : ""}
-          ${recipes ? `<div><strong>Recipes:</strong> ${escapeHtml(recipes)}</div>` : ""}
-        </div>`
-      : "";
+const recipeLinks = recipes
+  ? recipes.split(",").map(r => {
+      const trimmed = r.trim();
+      const safe = escapeHtml(trimmed);
+      return `<a href="#" class="recipe-link" data-item="${safe}">${safe}</a>`;
+    }).join(", ")
+  : "";
+
+const notesBlock = (notes || recipes)
+  ? `<div class="notes">
+      ${notes ? `<div><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : ""}
+      ${recipes ? `<div><strong>Recipes:</strong> ${recipeLinks}</div>` : ""}
+    </div>`
+  : "";
 
     return `
       <article class="item">
@@ -198,6 +206,8 @@ function render() {
     `;
   }).join("");
 }
+
+
 
 async function loadData() {
   setStatus("Loading data.json…");
@@ -242,6 +252,34 @@ async function loadData() {
     `;
   }
 }
+
+document.addEventListener("click", (e) => {
+  const link = e.target.closest(".recipe-link");
+  if (!link) return;
+
+  e.preventDefault();
+
+  const targetName = link.dataset.item.toLowerCase();
+
+  // Find the card
+  const cards = document.querySelectorAll(".item");
+  for (const card of cards) {
+    const title = card.querySelector("h3");
+    if (!title) continue;
+
+    if (title.textContent.toLowerCase() === targetName) {
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      card.style.outline = "2px solid #5de4c7";
+      card.style.transition = "outline 0.3s ease";
+      setTimeout(() => {
+        card.style.outline = "none";
+      }, 1500);
+
+      break;
+    }
+  }
+});
 
 function wireUI() {
   els.search.addEventListener("input", applyFilters);
