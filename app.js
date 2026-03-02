@@ -4,7 +4,7 @@
 // Uses your index.html IDs:
 //  #search, #tagFilter, #sortBy, #diyOnly, #count, #status, #list
 //
-// OPTIONAL UI (recommended):
+// OPTIONAL UI:
 //  Add this checkbox anywhere in controls to enable Exclude 100%:
 //    <label class="toggle">
 //      <input id="exclude100" type="checkbox" />
@@ -12,15 +12,18 @@
 //    </label>
 //
 // Loads:
-//  ./data.json     (items + materials, has RAW VALUE / PRICE / Recipies)
+//  ./data.json     (items; PRICE is "worth"/sell price)
 //  ./recipes.json  (recipe -> materials list; columns: Name, #1..#6, Material 1..6)
 //
-// Math:
-//  - Base (non-recipe) cost = RAW VALUE (number or 0 if "-" / blank)
-//  - Sell price = PRICE
-//  - Profit = Sell - Cost
-//  - Margin = Profit / Sell   (matches your 100% behavior when cost=0)
-//  - For recipe items: Cost is sum(qty * RAW VALUE(material)) using data.json lookup
+// MATH (YOUR RULES):
+//  - If item has a recipe (exists in recipes.json by Name):
+//      Cost = Σ (qty(material) * PRICE(material))
+//      Profit = PRICE(item) - Cost
+//      Margin = Profit / PRICE(item)
+//  - If item has NO recipe:
+//      Cost = 0
+//      Profit = PRICE(item)
+//      Margin = 100%
 // =========================
 
 let ALL = [];
@@ -106,17 +109,16 @@ async function loadJSON(path) {
 async function loadData() {
   setStatus("Loading...");
 
-  // Load both files (recipes is optional but expected now)
   const [dataRaw, recipesRaw] = await Promise.all([
     loadJSON("./data.json"),
-    loadJSON("./recipes.json").catch(() => null), // don’t hard-fail if missing
+    loadJSON("./recipes.json").catch(() => null),
   ]);
 
   if (!Array.isArray(dataRaw)) throw new Error("data.json must be an array of objects");
 
   ALL = dataRaw.map(normalizeItemRow);
 
-  // Build recipe map if recipes.json exists
+  // Build recipe map
   RECIPES = new Map();
   if (Array.isArray(recipesRaw)) {
     for (const r of recipesRaw) {
@@ -129,18 +131,18 @@ async function loadData() {
         const mat = norm(r[`Material ${i}`]);
         if (!mat) continue;
         if (!Number.isFinite(qty) || qty <= 0) continue;
-        mats.push({ name: mat, qty: qty });
+        mats.push({ name: mat, qty });
       }
 
       RECIPES.set(low(name), mats);
     }
   }
 
-  // Build item lookup for cost calculations
+  // Lookup items by name (for material PRICE)
   const byName = new Map();
   for (const item of ALL) byName.set(low(item.ITEM), item);
 
-  // Compute derived numbers + recipe materials
+  // Compute derived numbers using YOUR logic (PRICE-based)
   ALL = ALL.map((item) => computeDerived(item, byName));
 
   buildTagOptions();
@@ -150,21 +152,20 @@ async function loadData() {
 
 function normalizeItemRow(row) {
   return {
-    // keep exact headers
     ITEM: norm(row["ITEM"]),
-    RAW_VALUE: row["RAW VALUE"],
+    RAW_VALUE: row["RAW VALUE"], // kept for display only if you want; not used in calc now
     PRICE: row["PRICE"],
     TAG: norm(row["TAG"]),
     DIY: norm(row["DIY"]),
     NOTES: row["NOTES"],
     RECIPES: row["Recipies"],
 
-    // derived fields (filled later)
+    // derived
     _sell: NaN,
-    _cost: NaN,
+    _cost: 0,
     _profit: NaN,
     _margin: NaN,
-    _materials: [], // [{name, qty, unitCost, totalCost, known}]
+    _materials: [],
     _unknownMaterials: false,
     _hasRecipe: false,
   };
@@ -172,44 +173,49 @@ function normalizeItemRow(row) {
 
 function computeDerived(item, byName) {
   const sell = toNumber(item.PRICE);
-  const baseCost = toNumber(item.RAW_VALUE);
-  const hasRecipeRow = RECIPES.has(low(item.ITEM));
-  const mats = hasRecipeRow ? RECIPES.get(low(item.ITEM)) : [];
 
-  let cost = Number.isFinite(baseCost) ? baseCost : 0;
+  const recipe = RECIPES.get(low(item.ITEM));
+  const hasRecipe = Array.isArray(recipe) && recipe.length > 0;
+
+  let cost = 0;
   let materialsExpanded = [];
   let unknown = false;
 
-  if (mats.length) {
+  if (hasRecipe) {
     item._hasRecipe = true;
 
     let sum = 0;
-    materialsExpanded = mats.map((m) => {
+    materialsExpanded = recipe.map((m) => {
       const matItem = byName.get(low(m.name));
-      const unit = matItem ? toNumber(matItem.RAW_VALUE) : NaN;
-      const known = Number.isFinite(unit);
+      const unitPrice = matItem ? toNumber(matItem.PRICE) : NaN; // <-- KEY FIX: use PRICE
+      const known = Number.isFinite(unitPrice);
       if (!known) unknown = true;
 
-      const total = known ? unit * m.qty : NaN;
+      const total = known ? unitPrice * m.qty : NaN;
       if (Number.isFinite(total)) sum += total;
 
       return {
         name: m.name,
         qty: m.qty,
-        unitCost: unit,
+        unitPrice,
         totalCost: total,
         known,
       };
     });
 
-    // If some materials are unknown, we still show partial cost.
-    // If you want unknown -> treat as 0, this already does that by only summing known totals.
     cost = sum;
+  } else {
+    // Core item: no recipe => 0 cost, 100% profit
+    cost = 0;
   }
 
-  const profit = Number.isFinite(sell) ? sell - (Number.isFinite(cost) ? cost : 0) : NaN;
-  const margin =
-    Number.isFinite(sell) && sell !== 0 && Number.isFinite(profit) ? profit / sell : NaN;
+  let profit = NaN;
+  let margin = NaN;
+
+  if (Number.isFinite(sell)) {
+    profit = sell - cost;
+    margin = sell !== 0 ? profit / sell : NaN;
+  }
 
   return {
     ...item,
@@ -219,6 +225,7 @@ function computeDerived(item, byName) {
     _margin: margin,
     _materials: materialsExpanded,
     _unknownMaterials: unknown,
+    _hasRecipe: hasRecipe,
   };
 }
 
@@ -238,16 +245,14 @@ function buildTagOptions() {
 }
 
 // ---- search ranking ----
-// When there is a search query, we bump name matches to the top.
-// This fixes the “carp is way down the list” issue.
 function searchScore(item, q) {
   if (!q) return 0;
   const name = low(item.ITEM);
   const query = low(q);
 
-  if (name === query) return 1000; // exact
-  if (name.startsWith(query)) return 900; // prefix
-  if (name.includes(query)) return 700; // name contains
+  if (name === query) return 1000;
+  if (name.startsWith(query)) return 900;
+  if (name.includes(query)) return 700;
   if (includesCI(item.NOTES, q)) return 200;
   if (includesCI(item.RECIPES, q)) return 150;
   if (includesCI(item.TAG, q)) return 100;
@@ -266,14 +271,11 @@ function applyFilters() {
     if (diyOnly && x.DIY.toLowerCase() !== "yes") return false;
 
     if (exclude100) {
-      // Exclude margins that are effectively 100% (profit ~= sell)
-      // Use a small epsilon to avoid float weirdness.
       if (Number.isFinite(x._margin) && Math.abs(x._margin - 1) < 1e-9) return false;
     }
 
     if (!q) return true;
 
-    // Still allow broad search, BUT ranking will put name matches on top.
     return (
       includesCI(x.ITEM, q) ||
       includesCI(x.NOTES, q) ||
@@ -304,14 +306,12 @@ function sortView(arr, q) {
     return dir === "asc" ? av - bv : bv - av;
   };
 
-  // If searching, rank by name match first, then apply chosen sort inside that
   if (q) {
     out.sort((A, B) => {
       const sa = searchScore(A, q);
       const sb = searchScore(B, q);
       if (sa !== sb) return sb - sa;
 
-      // tie-breaker: apply selected mode
       switch (mode) {
         case "name_asc":
           return cmpText(A.ITEM, B.ITEM);
@@ -337,11 +337,9 @@ function sortView(arr, q) {
           return cmpText(A.ITEM, B.ITEM);
       }
     });
-
     return out;
   }
 
-  // Normal sorting when no search query
   out.sort((A, B) => {
     switch (mode) {
       case "name_asc":
@@ -382,7 +380,6 @@ function render(q) {
 
   els.list.innerHTML = VIEW.map(renderCard).join("");
 
-  // highlight exact item match if requested
   if (pendingHighlight) {
     const key = pendingHighlight.toLowerCase();
     pendingHighlight = null;
@@ -395,7 +392,6 @@ function render(q) {
     }
   }
 
-  // If they typed something and there's an exact name hit, auto-scroll it into view once
   if (q) {
     const exact = VIEW.find((x) => low(x.ITEM) === low(q));
     if (exact) {
@@ -418,7 +414,6 @@ function renderCard(x) {
   const notes = norm(x.NOTES);
   const recipesList = norm(x.RECIPES);
 
-  // Derived numbers
   const sell = x._sell;
   const cost = x._cost;
   const profit = x._profit;
@@ -447,13 +442,13 @@ function renderCard(x) {
                 return `<a href="#"
                           class="material-link ${unknown ? "unknown" : ""}"
                           data-item="${safeName}"
-                          title="${unknown ? "Missing RAW VALUE for this material" : ""}">
+                          title="${unknown ? "Missing PRICE for this material in data.json" : ""}">
                           ${safeLabel}
                         </a>`;
               })
               .join(" ")}
           </div>
-          ${x._unknownMaterials ? `<div class="warn">Some material costs are unknown (missing RAW VALUE).</div>` : ""}
+          ${x._unknownMaterials ? `<div class="warn">Some material prices are unknown (missing PRICE).</div>` : ""}
         </div>`
       : "";
 
@@ -490,10 +485,8 @@ function wireEvents() {
   els.tag.addEventListener("change", applyFilters);
   els.sort.addEventListener("change", applyFilters);
   els.diyOnly.addEventListener("change", applyFilters);
-
   if (els.exclude100) els.exclude100.addEventListener("change", applyFilters);
 
-  // Click recipe -> set search to that recipe name and highlight it
   document.addEventListener("click", (e) => {
     const recipe = e.target.closest(".recipe-link");
     if (recipe) {
@@ -502,13 +495,12 @@ function wireEvents() {
       if (!targetItem) return;
 
       els.search.value = targetItem;
-      els.tag.value = ""; // avoid filtering it away
+      els.tag.value = "";
       pendingHighlight = targetItem;
       applyFilters();
       return;
     }
 
-    // Click material -> search to that material item (so you can jump to the ingredient)
     const mat = e.target.closest(".material-link");
     if (mat) {
       e.preventDefault();
