@@ -11,22 +11,31 @@
 //      <span>Exclude 100% margin</span>
 //    </label>
 //
+// OPTIONAL UI:
+//  Add this checkbox anywhere in controls to enable Flick/CJ prices:
+//    <label class="toggle">
+//      <input id="flickcj" type="checkbox" />
+//      <span>Flick/CJ (1.5× Bugs/Fish)</span>
+//    </label>
+//
 // Loads:
 //  ./data.json     (items; PRICE is "worth"/sell price)
 //  ./recipes.json  (recipe -> materials list; columns: Name, #1..#6, Material 1..6)
 //
-// MATH (YOUR RULES):
+// MATH (ADAM'S RULES):
+//  - PRICE = what the item sells for (Nook). If Flick/CJ toggle is on, Bugs/Fish sell for 1.5× PRICE.
 //  - If item has a recipe (exists in recipes.json by Name):
-//      Cost = Σ (qty(material) * PRICE(material))
-//      Profit = PRICE(item) - Cost
-//      Margin = Profit / PRICE(item)
+//      RAW VALUE = Σ (qty(material) * PRICE(material))   // opportunity cost (selling mats instead)
+//      PROFIT    = PRICE(item) - RAW VALUE
+//      MARGIN    = PROFIT / RAW VALUE
 //  - If item has NO recipe:
-//      Cost = 0
-//      Profit = PRICE(item)
-//      Margin = 100%
+//      RAW VALUE = 0
+//      PROFIT    = PRICE(item)
+//      MARGIN    = 100%
 // =========================
 
-let ALL = [];
+let ALL = [];      // working set (may be visitor-adjusted)
+let ALL_BASE = []; // base computed set (no visitor)
 let VIEW = [];
 let RECIPES = new Map(); // key: recipe name (lower) -> [{name, qty}]
 let pendingHighlight = null;
@@ -37,6 +46,7 @@ const els = {
   sort: document.querySelector("#sortBy"),
   diyOnly: document.querySelector("#diyOnly"),
   exclude100: document.querySelector("#exclude100"), // optional
+  flickcj: document.querySelector("#flickcj"), // optional
   count: document.querySelector("#count"),
   status: document.querySelector("#status"),
   list: document.querySelector("#list"),
@@ -99,6 +109,31 @@ const splitCSV = (s) =>
         .filter(Boolean)
     : [];
 
+function isBugOrFishTag(tag) {
+  const t = low(tag);
+  return t === "bugs" || t === "bug" || t === "fish";
+}
+
+function applyVisitorPricing(item, useFlickCJ) {
+  if (!useFlickCJ) return item;
+  if (!isBugOrFishTag(item.TAG)) return item;
+  if (!Number.isFinite(item._sell)) return item;
+
+  const boostedSell = item._sell * 1.5;
+  // Bugs/Fish are not crafted: raw value should be 0, profit == sell, margin == 100%.
+  // (If you later add a crafted bug/fish somehow, this still behaves sanely.)
+  const rawValue = Number.isFinite(item._rawValue) ? item._rawValue : NaN;
+  const profit = Number.isFinite(rawValue) ? boostedSell - rawValue : NaN;
+  const margin = Number.isFinite(rawValue) ? (rawValue !== 0 ? profit / rawValue : 1) : NaN;
+
+  return {
+    ...item,
+    _sell: boostedSell,
+    _profit: profit,
+    _margin: margin,
+  };
+}
+
 // ---- load JSON ----
 async function loadJSON(path) {
   const res = await fetch(path, { cache: "no-store" });
@@ -142,18 +177,19 @@ async function loadData() {
   const byName = new Map();
   for (const item of ALL) byName.set(low(item.ITEM), item);
 
-  // Compute derived numbers using YOUR logic (PRICE-based)
+  // Compute derived numbers (PRICE-based)
   ALL = ALL.map((item) => computeDerived(item, byName));
+  ALL_BASE = ALL;
 
   buildTagOptions();
   applyFilters();
-  setStatus(RECIPES.size ? "" : "recipes.json not found (DIY cost calc limited)");
+  setStatus(RECIPES.size ? "" : "recipes.json not found (DIY raw value calc limited)");
 }
 
 function normalizeItemRow(row) {
   return {
     ITEM: norm(row["ITEM"]),
-    RAW_VALUE: row["RAW VALUE"], // kept for display only if you want; not used in calc now
+    RAW_VALUE: row["RAW VALUE"], // kept for legacy/reference; not used in calc
     PRICE: row["PRICE"],
     TAG: norm(row["TAG"]),
     DIY: norm(row["DIY"]),
@@ -162,7 +198,7 @@ function normalizeItemRow(row) {
 
     // derived
     _sell: NaN,
-    _cost: 0,
+    _rawValue: 0,
     _profit: NaN,
     _margin: NaN,
     _materials: [],
@@ -177,7 +213,7 @@ function computeDerived(item, byName) {
   const recipe = RECIPES.get(low(item.ITEM));
   const hasRecipe = Array.isArray(recipe) && recipe.length > 0;
 
-  let cost = 0;
+  let rawValue = 0;
   let materialsExpanded = [];
   let unknown = false;
 
@@ -187,7 +223,7 @@ function computeDerived(item, byName) {
     let sum = 0;
     materialsExpanded = recipe.map((m) => {
       const matItem = byName.get(low(m.name));
-      const unitPrice = matItem ? toNumber(matItem.PRICE) : NaN; // <-- KEY FIX: use PRICE
+      const unitPrice = matItem ? toNumber(matItem.PRICE) : NaN;
       const known = Number.isFinite(unitPrice);
       if (!known) unknown = true;
 
@@ -203,24 +239,30 @@ function computeDerived(item, byName) {
       };
     });
 
-    cost = sum;
+    rawValue = sum;
   } else {
-    // Core item: no recipe => 0 cost, 100% profit
-    cost = 0;
+    rawValue = 0;
   }
 
   let profit = NaN;
   let margin = NaN;
 
   if (Number.isFinite(sell)) {
-    profit = sell - cost;
-    margin = sell !== 0 ? profit / sell : NaN;
+    if (unknown && hasRecipe) {
+      // Don't lie with partial math if we don't know all material prices.
+      rawValue = NaN;
+      profit = NaN;
+      margin = NaN;
+    } else {
+      profit = sell - rawValue;
+      margin = rawValue !== 0 ? profit / rawValue : 1;
+    }
   }
 
   return {
     ...item,
     _sell: sell,
-    _cost: cost,
+    _rawValue: rawValue,
     _profit: profit,
     _margin: margin,
     _materials: materialsExpanded,
@@ -265,6 +307,10 @@ function applyFilters() {
   const tag = norm(els.tag.value);
   const diyOnly = !!(els.diyOnly && els.diyOnly.checked);
   const exclude100 = !!(els.exclude100 && els.exclude100.checked);
+  const useFlickCJ = !!(els.flickcj && els.flickcj.checked);
+
+  // Create the working set (base or visitor-adjusted).
+  ALL = useFlickCJ ? ALL_BASE.map((x) => applyVisitorPricing(x, true)) : ALL_BASE;
 
   VIEW = ALL.filter((x) => {
     if (tag && x.TAG !== tag) return false;
@@ -415,7 +461,7 @@ function renderCard(x) {
   const recipesList = norm(x.RECIPES);
 
   const sell = x._sell;
-  const cost = x._cost;
+  const rawValue = x._rawValue;
   const profit = x._profit;
   const margin = x._margin;
 
@@ -468,8 +514,8 @@ function renderCard(x) {
       <div class="meta">
         <span class="pill">Tag: ${escapeHtml(tag)}</span>
         <span class="pill">DIY: ${escapeHtml(diy)}</span>
-        <span class="pill">Sell: ${escapeHtml(fmtInt(sell))}</span>
-        <span class="pill">Cost: ${escapeHtml(fmtInt(cost))}</span>
+        <span class="pill">Price: ${escapeHtml(fmtInt(sell))}</span>
+        <span class="pill">Raw Value: ${escapeHtml(fmtInt(rawValue))}</span>
         <span class="pill">Profit: ${escapeHtml(fmtInt(profit))}</span>
         <span class="pill">Margin: ${escapeHtml(fmtPct(margin))}</span>
       </div>
@@ -486,6 +532,7 @@ function wireEvents() {
   els.sort.addEventListener("change", applyFilters);
   els.diyOnly.addEventListener("change", applyFilters);
   if (els.exclude100) els.exclude100.addEventListener("change", applyFilters);
+  if (els.flickcj) els.flickcj.addEventListener("change", applyFilters);
 
   document.addEventListener("click", (e) => {
     const recipe = e.target.closest(".recipe-link");
