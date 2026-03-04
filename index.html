@@ -12,12 +12,16 @@
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="title">
-      <h1>ACNH Item DB</h1>
-      <p class="sub">Search + filter. Works offline (if you add a service worker later).</p>
-    </div>
-  </header>
+<header class="topbar">
+  <div class="title">
+    <h1>ACNH Item DB</h1>
+    <p class="sub">Search + filter. Works offline.</p>
+  </div>
+
+  <button id="installBtn" class="install-btn" hidden>
+    Install App
+  </button>
+</header>
 
   <main class="wrap">
     <section class="controls card">
@@ -71,5 +75,30 @@
       });
     }
   </script>
+
+<script>
+let deferredPrompt;
+const installBtn = document.getElementById("installBtn");
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.hidden = false;
+});
+
+installBtn.addEventListener("click", async () => {
+  if (!deferredPrompt) return;
+
+  deferredPrompt.prompt();
+  const result = await deferredPrompt.userChoice;
+
+  if (result.outcome === "accepted") {
+    installBtn.hidden = true;
+  }
+
+  deferredPrompt = null;
+});
+</script>
+  
 </body>
 </html>
